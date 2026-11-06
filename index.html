@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Hệ Thống Bản Đồ Tương Tác Chỉ Đường Tự Động</title>
+    <style>
+        /* CSS Reset và thiết lập giao diện cốt lõi */
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #ffffff;
+            overflow: hidden; /* Ngăn chặn cuộn trang không mong muốn trên mobile */
+        }
+
+        /* 
+         * Kỹ thuật thiết kế Responsive Iframe
+         * Sử dụng 100vh để đảm bảo container chiếm trọn chiều cao viewport 
+         */
+        #map-wrapper {
+            position: relative;
+            width: 100%;
+            height: 100vh;
+        }
+
+        #google-map-canvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Cấu trúc Typography và Layout cho InfoWindow */
+        .info-window-card {
+            max-width: 300px;
+            padding: 4px;
+            color: #202124;
+        }
+
+        .info-window-card h3 {
+            margin: 0 0 8px 0;
+            font-size: 16px;
+            color: #1a73e8;
+            font-weight: 600;
+        }
+
+        .info-detail-row {
+            margin-bottom: 6px;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+
+        .label-highlight {
+            font-weight: 600;
+            color: #5f6368;
+        }
+
+        /* Thuật toán CSS thuần cho Star Rating */
+        .css-star-rating {
+            display: inline-block;
+            font-size: 16px;
+            color: #dadce0; /* Nền sao xám */
+            position: relative;
+            vertical-align: middle;
+        }
+
+        .css-star-rating-fill {
+            color: #fbbc04; /* Màu sao vàng Google */
+            position: absolute;
+            top: 0;
+            left: 0;
+            overflow: hidden;
+            white-space: nowrap;
+        }
+
+        .rating-score {
+            font-size: 13px;
+            font-weight: 600;
+            margin-left: 4px;
+            vertical-align: middle;
+        }
+
+        /* UI Nút Tương tác Call-To-Action */
+        .action-button-routing {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            background-color: #1a73e8;
+            color: #ffffff;
+            border: none;
+            padding: 8px 12px;
+            margin-top: 12px;
+            border-radius: 4px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+        }
+
+        .action-button-routing:hover {
+            background-color: #1557b0;
+        }
+
+        /* Lớp phủ cảnh báo tương tác (Feedback Overlay) */
+        #system-notification {
+            position: absolute;
+            top: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(32, 33, 36, 0.9);
+            color: #ffffff;
+            padding: 10px 24px;
+            border-radius: 24px;
+            font-size: 14px;
+            font-weight: 500;
+            z-index: 9999;
+            display: none;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            text-align: center;
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="map-wrapper">
+        <div id="system-notification">Khởi tạo dữ liệu...</div>
+        <div id="google-map-canvas"></div>
+    </div>
+
+    <!-- 
+      Tải không đồng bộ Google Maps API. 
+      Kích hoạt thư viện 'marker' (cho AdvancedMarkerElement) và 'directions' (mặc định) 
+    -->
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key=YOUR_GOOGLE_MAPS_API_KEY&libraries=marker&callback=bootstrapMapApp"></script>
+
+    <script>
+        /**
+         * Lớp Dữ liệu (Data Layer)
+         * Quản trị viên tùy biến danh sách điểm đến tại khối JSON này.
+         */
+        const destinationsData = [
+            {
+                id: "poi_01",
+                name: "Trụ sở Công ty Cổ phần Alpha",
+                lat: 21.031535, 
+                lng: 105.850212, 
+                rating: 4.8,
+                feedback: "Văn phòng hiện đại, hệ thống an ninh tốt. Hỗ trợ khách hàng nhiệt tình.",
+                checkin: "Khu vực sảnh đón khách tầng 1, Phòng trưng bày công nghệ",
+                popularDishes: "Cà phê máy tự động, Trà lài phục vụ khách"
+            },
+            {
+                id: "poi_02",
+                name: "Nhà hàng Đối tác Beta",
+                lat: 21.034512, 
+                lng: 105.852323,
+                rating: 4.4,
+                feedback: "Thực đơn phong phú, không gian mở phù hợp cho tiệc công ty.",
+                checkin: "Ban công view hồ, Quầy bar mở",
+                popularDishes: "Bò bít tết thăn ngoại, Rượu vang đỏ, Bánh mì bơ tỏi"
+            },
+            {
+                id: "poi_03",
+                name: "Trung tâm Hội nghị Gamma",
+                lat: 21.026131, 
+                lng: 105.845610,
+                rating: 4.9,
+                feedback: "Hội trường rộng, âm thanh ánh sáng chuẩn quốc tế. Giao thông thuận tiện.",
+                checkin: "Khán phòng chính, Khu vực check-in sự kiện ngoài trời",
+                popularDishes: "Tiệc trà Teabreak, Buffet hải sản cao cấp"
+            }
+        ];
+
+        // Khai báo các đối tượng toàn cục của hệ thống
+        let mapInstance;
+        let directionsServiceEngine;
+        let directionsRendererEngine;
+        let currentOpenInfoWindow = null;
+
+        /**
+         * Hàm tiện ích tạo giao diện Star Rating CSS Thuần
+         */
+        function renderStarRatingUI(ratingValue) {
+            const fillPercentage = (ratingValue / 5) * 100;
+            return `
+                <div class="css-star-rating">
+                    <span>★★★★★</span>
+                    <div class="css-star-rating-fill" style="width: ${fillPercentage}%;">★★★★★</div>
+                </div>
+                <span class="rating-score">${ratingValue.toFixed(1)}/5</span>
+            `;
+        }
+
+        /**
+         * Hàm khởi động chính, được gọi bởi callback của Google Maps API
+         */
+        async function bootstrapMapApp() {
+            // Khởi tạo các cỗ máy định tuyến
+            directionsServiceEngine = new google.maps.DirectionsService();
+            directionsRendererEngine = new google.maps.DirectionsRenderer({
+                suppressMarkers: false, 
+                polylineOptions: {
+                    strokeColor: "#1a73e8", // Màu xanh tiêu chuẩn của Google Navigation
+                    strokeWeight: 5,
+                    strokeOpacity: 0.8
+                }
+            });
+
+            // Cấu hình tham số cốt lõi cho Bản đồ
+            const mapConfigOptions = {
+                zoom: 14,
+                center: { lat: 21.0285, lng: 105.8480 }, // Tọa độ trung tâm mặc định
+                mapId: "MAP_INSTANCE_01", // Bắt buộc đối với AdvancedMarkerElement
+                disableDefaultUI: false,
+                clickableIcons: false // Vô hiệu hóa click vào các điểm không thuộc danh sách
+            };
+
+            const mapDomElement = document.getElementById("google-map-canvas");
+            mapInstance = new google.maps.Map(mapDomElement, mapConfigOptions);
+            directionsRendererEngine.setMap(mapInstance);
+
+            // Tải thư viện Marker Nâng cao một cách bất đồng bộ
+            const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
+
+            // Xử lý từng phần tử trong cơ sở dữ liệu
+            destinationsData.forEach(destination => {
+                const markerPosition = { lat: destination.lat, lng: destination.lng };
+
+                // Khởi tạo đối tượng ghim
+                const mapMarker = new AdvancedMarkerElement({
+                    map: mapInstance,
+                    position: markerPosition,
+                    title: destination.name
+                });
+
+                // Khởi tạo cấu trúc HTML cho Hộp thoại Thông tin (InfoWindow)
+                const infoWindowContent = `
+                    <div class="info-window-card">
+                        <h3>${destination.name}</h3>
+                        <div class="info-detail-row">
+                            ${renderStarRatingUI(destination.rating)}
+                        </div>
+                        <div class="info-detail-row">
+                            <span class="label-highlight">Phản hồi:</span> ${destination.feedback}
+                        </div>
+                        <div class="info-detail-row">
+                            <span class="label-highlight">Điểm Check-in:</span> ${destination.checkin}
+                        </div>
+                        <div class="info-detail-row">
+                            <span class="label-highlight">Nổi bật:</span> ${destination.popularDishes}
+                        </div>
+                        <button class="action-button-routing" onclick="executeRoutingTask(${destination.lat}, ${destination.lng})">
+                            <span style="margin-right: 6px;">🧭</span> Chỉ đường ngay
+                        </button>
+                    </div>
+                `;
+
+                const infoWindowInstance = new google.maps.InfoWindow({
+                    content: infoWindowContent,
+                    maxWidth: 320,
+                    ariaLabel: destination.name
+                });
+
+                // Lắng nghe sự kiện click trên từng điểm ghim
+                mapMarker.addListener("click", () => {
+                    // Đóng cửa sổ cũ nếu đang mở để tránh chồng chéo giao diện
+                    if (currentOpenInfoWindow) {
+                        currentOpenInfoWindow.close();
+                    }
+                    infoWindowInstance.open(mapInstance, mapMarker);
+                    currentOpenInfoWindow = infoWindowInstance;
+                });
+            });
+        }
+
+        /**
+         * Hàm xử lý luồng định vị và gọi API định tuyến
+         */
+        function executeRoutingTask(targetLat, targetLng) {
+            const uiNotification = document.getElementById("system-notification");
+            
+            if (navigator.geolocation) {
+                uiNotification.style.display = "block";
+                uiNotification.innerText = "Đang xác định tọa độ GPS của bạn...";
+
+                navigator.geolocation.getCurrentPosition(
+                    (gpsPosition) => {
+                        const originCoordinates = {
+                            lat: gpsPosition.coords.latitude,
+                            lng: gpsPosition.coords.longitude
+                        };
+
+                        // Khởi tạo yêu cầu gửi tới Google Directions API
+                        const routingRequest = {
+                            origin: originCoordinates,
+                            destination: { lat: targetLat, lng: targetLng },
+                            travelMode: google.maps.TravelMode.DRIVING 
+                        };
+
+                        directionsServiceEngine.route(routingRequest, (routingResult, responseStatus) => {
+                            if (responseStatus === "OK") {
+                                // Nếu thành công, chuyển dữ liệu cho Renderer để vẽ đồ họa
+                                directionsRendererEngine.setDirections(routingResult);
+                                uiNotification.style.display = "none";
+                                
+                                // Đóng hộp thoại thông tin để tối ưu không gian hiển thị đường đi
+                                if(currentOpenInfoWindow) currentOpenInfoWindow.close();
+                            } else {
+                                uiNotification.innerText = "Thuật toán định tuyến thất bại: " + responseStatus;
+                                setTimeout(() => uiNotification.style.display = "none", 4000);
+                            }
+                        });
+                    },
+                    (geolocationError) => {
+                        // Cây logic xử lý ngoại lệ về quyền riêng tư và phần cứng
+                        let errorMessage = "Không thể đọc dữ liệu cảm biến không gian.";
+                        switch(geolocationError.code) {
+                            case 1: 
+                                errorMessage = "Truy cập bị từ chối. Hãy cho phép sử dụng vị trí trên trình duyệt."; 
+                                break;
+                            case 2: 
+                                errorMessage = "Vị trí không khả dụng. Kiểm tra kết nối mạng/GPS."; 
+                                break;
+                            case 3: 
+                                errorMessage = "Giao tiếp phần cứng quá thời gian (Timeout)."; 
+                                break;
+                        }
+                        uiNotification.innerText = errorMessage;
+                        setTimeout(() => uiNotification.style.display = "none", 5000);
+                    },
+                    { 
+                        enableHighAccuracy: true, // Ép buộc sử dụng chip GPS phần cứng nếu có
+                        timeout: 10000,           // Thời gian chờ tối đa 10 giây
+                        maximumAge: 0             // Không sử dụng dữ liệu định vị được lưu trong cache
+                    }
+                );
+            } else {
+                alert("Lỗi phần mềm: Trình duyệt của bạn không hỗ trợ công nghệ định vị HTML5 Geolocation.");
+            }
+        }
+    </script>
+</body>
+</html>
